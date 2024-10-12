@@ -4,6 +4,7 @@ import com.example.demo.Repository.SubscriptionsRepository;
 import com.example.demo.Repository.UserRepository;
 import com.example.demo.entites.Subscriptions;
 import com.example.demo.entites.User;
+import com.example.demo.Log.LoggerConfig;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import org.springframework.cache.annotation.Cacheable;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.logging.Logger;
 
 @RestController
 @AllArgsConstructor
@@ -22,6 +24,7 @@ public class RedisController {
     final RedisService redisService;
     final UserRepository userRepository;
     final SubscriptionsRepository subscriptionsRepository;
+    private static final Logger logger = LoggerConfig.getLogger();
 
     @GetMapping("/helloworld")
     public ResponseEntity<HelloWorldResponse> sayHello() {
@@ -68,10 +71,12 @@ public class RedisController {
         int subscription_id = user.getSubscription_id();
         int rateLimit = subscriptionsRepository.findById(subscription_id).orElseThrow(() -> new RuntimeException("Subscription not found")).getRate_limit_count();
         int time_window = subscriptionsRepository.findById(subscription_id).orElseThrow(() -> new RuntimeException("Subscription not found")).getTime_window();
+        String subscriptionType = subscriptionsRepository.findById(subscription_id).orElseThrow(() -> new RuntimeException("Subscription not found")).getSubscription_type();
         String key = "rate_limit:" + userId + ":" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd:HH:mm"));
         Object currentCountObj = redisService.getData(key);
         int currentCount = currentCountObj == null ? 0 : (int) currentCountObj;
         if (currentCount >= rateLimit) {
+            logger.warning("User " + userId + " with subscription " + subscriptionType + " exceeded the rate limit at " + LocalDateTime.now());
             return "Rate limit exceeded. Try again later.";
         } else {
             redisService.incKey(key);
