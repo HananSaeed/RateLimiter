@@ -13,15 +13,16 @@ import lombok.experimental.SuperBuilder;
 @AllArgsConstructor
 @NoArgsConstructor
 @SuperBuilder
-@Table(name = "users")
+@Table(name = "User")
 @Entity
-public class users {
+public class User {
+    // make it auto increment
     @Id
     private int user_id;
     @Column(name = "username")
     private String username;
-    @Column(name = "subscription_type")
-    private String subscription_type;
+    @Column(name = "subscription_id")
+    private int subscription_id;
 
 }
 
