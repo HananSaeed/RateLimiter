@@ -1,9 +1,6 @@
 package com.example.demo.entites;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
@@ -18,6 +15,7 @@ import lombok.experimental.SuperBuilder;
 public class User {
     // make it auto increment
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int user_id;
     @Column(name = "username")
     private String username;
