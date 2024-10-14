@@ -2,19 +2,19 @@ package com.example.demo.Redis;
 
 import com.example.demo.Repository.SubscriptionsRepository;
 import com.example.demo.Repository.UserRepository;
-import com.example.demo.entites.Subscriptions;
 import com.example.demo.entites.User;
 import com.example.demo.Log.LoggerConfig;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 @RestController
@@ -37,7 +37,10 @@ public class RedisController {
         Thread.sleep(80000);
         return ResponseEntity.ok().body(new HelloWorldResponse("Hello World message"));
     }
-
+    @PostMapping("/users")
+    public ResponseEntity<User> saveUser(@RequestBody User user) {
+        return ResponseEntity.ok().body(userRepository.save(user));
+    }
     @GetMapping("/long-time-cache/{name}")
     @SneakyThrows
     public ResponseEntity<HelloWorldResponse> waitTaskCache(@PathVariable String name) {
@@ -49,7 +52,6 @@ public class RedisController {
             responseMessage = String.format(responseMessage, name);
             redisService.saveData(name, responseMessage +"%");
         } else {
-            // cache hit
             responseMessage = redisResult;
         }
         return ResponseEntity.ok().body(new HelloWorldResponse(responseMessage));
@@ -66,23 +68,57 @@ public class RedisController {
     }
 
     @GetMapping("/limited-endpoint/{userId}")
-    public String rateLimitedEndpoint(@PathVariable int userId) {
+    public ResponseEntity<String> rateLimitedEndpoint(@PathVariable int userId) {
         User user = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
         int subscription_id = user.getSubscription_id();
         int rateLimit = subscriptionsRepository.findById(subscription_id).orElseThrow(() -> new RuntimeException("Subscription not found")).getRate_limit_count();
         int time_window = subscriptionsRepository.findById(subscription_id).orElseThrow(() -> new RuntimeException("Subscription not found")).getTime_window();
         String subscriptionType = subscriptionsRepository.findById(subscription_id).orElseThrow(() -> new RuntimeException("Subscription not found")).getSubscription_type();
-        String key = "rate_limit:" + userId + ":" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd:HH:mm"));
+        String key = "rate_limit:count:" + userId;
+        System.out.println("Key: " + key);
         Object currentCountObj = redisService.getData(key);
         int currentCount = currentCountObj == null ? 0 : (int) currentCountObj;
+
         if (currentCount >= rateLimit) {
             logger.warning("User " + userId + " with subscription " + subscriptionType + " exceeded the rate limit at " + LocalDateTime.now());
-            return "Rate limit exceeded. Try again later.";
+             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body("Rate limit exceeded. Try again later.");
         } else {
             redisService.incKey(key);
-            redisService.saveDataWithExpiration(key, currentCount + 1,time_window);
-            return "Request processed.";
+            redisService.saveDataWithExpiration(key, currentCount + 1, time_window);
+            return ResponseEntity.ok().body("Request processed.");
         }
     }
+
+    @GetMapping("/sliding-window-limited-endpoint/{userId}")
+    public ResponseEntity<String> slidingWindowRateLimitedEndpoint(@PathVariable int userId) {
+        User user = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
+        int subscriptionId = user.getSubscription_id();
+        int rateLimit = subscriptionsRepository.findById(subscriptionId)
+                .orElseThrow(() -> new RuntimeException("Subscription not found"))
+                .getRate_limit_count();
+        int timeWindow = subscriptionsRepository.findById(subscriptionId)
+                .orElseThrow(() -> new RuntimeException("Subscription not found"))
+                .getTime_window();
+        String subscriptionType = subscriptionsRepository.findById(subscriptionId)
+                .orElseThrow(() -> new RuntimeException("Subscription not found"))
+                .getSubscription_type();
+        String key = "rate_limit:timestamps:" + userId;
+
+        long currentTime = Instant.now().getEpochSecond();
+        redisService.removeOldTimestamps(key, currentTime - timeWindow);
+
+        Set<Object> timestamps = redisService.getTimestamps(key, currentTime - timeWindow, currentTime);
+        int currentCount = timestamps.size();
+
+        if (currentCount >= rateLimit) {
+            logger.warning("User " + userId + " with subscription " + subscriptionType + " exceeded the rate limit at " + Instant.now());
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body("Rate limit exceeded. Try again later.");
+        } else {
+            redisService.saveTimestamp(key, currentTime);
+            redisService.setExpiration(key, timeWindow , TimeUnit.SECONDS);
+            return ResponseEntity.ok().body("Request processed.");
+        }
+    }
+
 
 }
